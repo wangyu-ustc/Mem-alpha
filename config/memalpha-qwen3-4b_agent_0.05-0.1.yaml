@@ -1,0 +1,10 @@
+agent_name: "minimal_memory_agent_qwen_converted"
+model_name: "YuWangX/Memalpha-4B"
+enable_thinking: false
+vllm: true
+thinking_budget: 1024
+max_new_tokens: 2048
+
+infer_with_full_memory: true
+external_model_url: http://127.0.0.1:5005/batch_process
+api_key: EMPTY

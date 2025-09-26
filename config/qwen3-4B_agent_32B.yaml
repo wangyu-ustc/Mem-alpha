@@ -1,0 +1,9 @@
+agent_name: "base"
+model_name: "Qwen/Qwen3-4B"
+enable_thinking: false
+vllm: true
+max_new_tokens: 2048
+
+infer_with_full_memory: true
+external_model_url: http://127.0.0.1:5006/batch_process
+api_key: EMPTY

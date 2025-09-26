@@ -1,0 +1,15 @@
+rank_bm25
+qwen-agent
+flask
+flask-restful
+nltk
+rouge_score
+ipdb
+json_repair
+editdistance
+pytest-cov
+pytest_mock
+pytest-random-order
+tensorstore!=0.1.46,!=0.1.72
+nvidia-modelopt[torch]>=0.23.2
+rapidfuzz

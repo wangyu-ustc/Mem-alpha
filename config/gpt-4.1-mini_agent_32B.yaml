@@ -1,0 +1,9 @@
+agent_name: "gpt-41-mini"
+model_name: "gpt-4.1-mini"
+enable_thinking: false
+vllm: true
+max_new_tokens: 2048
+
+infer_with_full_memory: true
+external_model_url: http://127.0.0.1:5005/batch_process
+api_key: EMPTY
