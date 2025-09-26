@@ -1,0 +1,7 @@
+working_dir: /home/wangyu/work/Mem-alpha
+excludes: ["/.git/", "/__pycache__/", "*.pyc"]
+env_vars:
+  TORCH_NCCL_AVOID_RECORD_STREAMS: "1"
+  PYTHONPATH: "/home/wangyu/work/Mem-alpha"
+  # If you are using vllm<=0.6.3, you might need to set the following environment variable to avoid bugs:
+  # VLLM_ATTENTION_BACKEND: "XFORMERS"
