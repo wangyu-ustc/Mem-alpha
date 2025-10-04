@@ -113,7 +113,7 @@ bash scripts/train_memory_grpo_qwen3-4b-4node-compression0.4-content0.1.sh
 
 **Parameter explanations:**
 - **β (beta)**: Compression reward coefficient - penalizes excessive memory usage
-- **γ (gamma)**: Content reward coefficient - rewards information retention
+- **γ (gamma)**: Content reward coefficient - measure whether the information is put into the correct memory type
 
 ## Evaluation
 
