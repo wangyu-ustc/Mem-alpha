@@ -216,15 +216,6 @@ python process_data.py --dataset lme_train --split-single-dataset
 python process_data.py --merge-datasets pubmed-rct lme_train squad hotpotqa perltqa ttl_train booksum --limit-size 100
 ```
 
-After processing, move the files to match the expected structure:
-
-```bash
-# Move processed files to correct directories
-mkdir -p data/memalpha/train data/memalpha/test
-mv data/memalpha/train.parquet data/memalpha/train/
-mv data/memalpha/test.parquet data/memalpha/test/
-```
-
 ### MemoryAgentBench Dataset
 
 To build the MemoryAgentBench evaluation dataset from scratch:
