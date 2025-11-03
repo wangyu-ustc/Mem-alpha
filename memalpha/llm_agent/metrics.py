@@ -677,50 +677,15 @@ def metrics_summarization(output, query, answer, dataset_config, metrics, result
 
 def _extract_answer_from_response(predicted_answer):
     """
-    Extracts content within <answer></answer> tags or from \\box{}/\\boxed{} format using regex.
+    Extract the final answer from a ``\\boxed{...}`` expression, returning the
+    original string when the marker is absent or malformed.
     """
-    # Attempt to match <answer></answer> tags
-    answer_pattern = r'<answer>(.*?)</answer>'
-    match = re.search(answer_pattern, predicted_answer, re.DOTALL | re.IGNORECASE)
-    
-    if match:
-        return match.group(1).strip()
-    
-    # Helper function to extract content from balanced braces
-    def extract_balanced_braces(text, start_pattern):
-        """Extract content from balanced braces after finding the start pattern."""
-        match = re.search(start_pattern, text)
-        if not match:
-            return None
-            
-        start_pos = match.end() - 1  # Position of the opening brace
-        if start_pos >= len(text) or text[start_pos] != '{':
-            return None
-            
-        brace_count = 0
-        content_start = start_pos + 1
-        
-        for i in range(start_pos, len(text)):
-            if text[i] == '{':
-                brace_count += 1
-            elif text[i] == '}':
-                brace_count -= 1
-                if brace_count == 0:
-                    return text[content_start:i]
-        
-        return None  # Unmatched braces
-    
-    # Try to match \\boxed{} format (preferred for math/classification)
-    boxed_content = extract_balanced_braces(predicted_answer, r'\\boxed\{')
-    if boxed_content is not None:
-        return boxed_content.strip()
-    
-    # If \\boxed{} not found, try to match \\box{} format for backwards compatibility
-    box_content = extract_balanced_braces(predicted_answer, r'\\box\{')
-    if box_content is not None:
-        return box_content.strip()
-    
-    # If none of the above patterns found, return the original answer
+
+    boxed_pattern = r'\\boxed\{([^}]*)\}'
+    boxed_match = re.search(boxed_pattern, predicted_answer)
+    if boxed_match:
+        return boxed_match.group(1).strip()
+
     return predicted_answer.strip()
 
 def evaluate_wrt_source(output, answer, sub_dataset_name):
@@ -744,4 +709,3 @@ def evaluate_wrt_source(output, answer, sub_dataset_name):
         return float(answer == extracted_answer)
     else:
         return default_post_process(output, answer)[0]['substring_exact_match']
-

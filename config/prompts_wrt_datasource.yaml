@@ -4,24 +4,12 @@ squad:
     query_prompt: null
     including_core: true
 
-squad_test:
-    query_prompt: null
-    including_core: true
-
 hotpotqa:
     query_prompt: null
     including_core: true
 
-detectiveqa:
-    query_prompt: "Your core memory contains your understanding of the book. When answering questions, put your final answer in \\box{}, such as \\box{A} or \\box{B} or \\box{C} or \\box{D}."
-    including_core: true
-
 booksum:
     query_prompt: "Your core memory contains a comprehensive book summary. Use this information to fulfill the user's request."
-    including_core: true
-
-narrativeqa:
-    query_prompt: "The content of the book is saved into the memory. Use the information to fulfill the user's request."
     including_core: true
 
 pubmed-rct:
@@ -36,16 +24,8 @@ perltqa:
     query_prompt: null
     including_core: true
 
-cr_train:
-    query_prompt: null
-    including_core: true
-
 lme_train:
     query_prompt: null
-    including_core: true
-
-eurlex:
-    query_prompt: "Your core memory is used to store the classification rules of the articles. Identify the meaning of each class and how the article is classified. Your semantic memory likely includes example labels. Fulfill the user's request with the core memory.\n\nWhen answering questions, you should put the final prediction of the labels in the format of \\boxed{labels}"
     including_core: true
 
 accurate_retrieval:
@@ -76,9 +56,6 @@ test_time_learning:
     query_prompt: "Your core memory is used to store the classification rules of the articles. Identify the meaning of each class and how the article is classified. Your semantic memory likely includes example labels. Fulfill the user's request with the core memory.\n\nWhen answering questions, you should put the final prediction in the format of \\boxed{label}. Note that the label is a single number."
     including_core: true
 
-recsys_redial_full:
-    query_prompt: "Your core memory contains recommendation logic and conversational patterns from user-system interactions. Use this knowledge to mimic the recommendation system and provide appropriate recommendations based on the conversation context."
-    including_core: true
 
 icl_banking77_5900shot_balance:
     query_prompt: "Your core memory is used to store the classification rules of the articles. Identify the meaning of each class and how the article is classified. Your semantic memory likely includes example labels. Fulfill the user's request with the core memory.\n\nWhen answering questions, you should put the final prediction in the format of \\boxed{label}. Note that the label is a single number."

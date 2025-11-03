@@ -1103,7 +1103,7 @@ def process_pubmed_rct_dataset():
         else:
             labels_str = str(labels)
 
-        question = f"Sentence: {text}\nWhat are the labels for the above medical abstract sentence? Put your final answer in <answer></answer>." # TODO: Prompt engineering
+        question = f"Sentence: {text}\nWhat are the labels for the above medical abstract sentence? Put your final answer as \\boxed{{label}}." # TODO: Prompt engineering
         answer = labels_str
 
         return {"question": question, "answer": answer}
@@ -4555,7 +4555,7 @@ def process_ttl_train_dataset():
             qa_pairs = []
             for q, a in zip(test_questions, test_answers):
                 # Format question like pubmed-rct
-                formatted_question = f"Sentence: {q}\nWhat are the labels for the above sentence? Put your final answer in <answer></answer>."
+                formatted_question = f"Sentence: {q}\nWhat are the labels for the above sentence? Put your final answer as \\boxed{{label}}."
                 qa_pairs.append({
                     'question': formatted_question,
                     'answer': a,

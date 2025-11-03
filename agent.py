@@ -62,7 +62,7 @@ class MemoryAgent:
 
         # Determine model type and set default if not provided
         self.model_name = model_name
-        self.is_qwen = "qwen" in model_name.lower()
+        self.is_qwen = False if "gpt" in model_name.lower() else True
         self.is_template = is_template
 
         # Initialize based on model type

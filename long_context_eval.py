@@ -499,7 +499,7 @@ Your answer:
         elif data_source == 'eurlex':
             # F1 score for legal document classification
 
-            # Extract the content between <answer></answer> tags
+            # Extract the final answer inside \boxed{}
             extracted_content = _extract_answer_from_response(predicted_answer)
             return evaluate_eurlex([extracted_content], [gold_answer])
 

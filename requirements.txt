@@ -28,7 +28,7 @@ wandb==0.19.11
 
 # Megatron and Distributed Training
 megatron-core @ git+https://github.com/NVIDIA/Megatron-LM.git@408eb7186a68ba4d30ee6cc8b05b4de6ba702148
-apex @ file:///workspace/apex
+apex @ git+https://github.com/NVIDIA/apex.git@90055a9188f907e1fd78d9099aa45252efd62efb
 transformer_engine @ git+https://github.com/NVIDIA/TransformerEngine.git@c55e425ac5751c72bfa656560fc7c65ab7d895e9
 
 # Flash Attention

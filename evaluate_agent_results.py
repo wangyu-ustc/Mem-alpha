@@ -8,42 +8,13 @@ from rouge_score import rouge_scorer
 from typing import List, Dict, Any
 from openai import OpenAI
 
-from memalpha.llm_agent.metrics import evaluate_wrt_source
+from memalpha.llm_agent.metrics import evaluate_wrt_source, _extract_answer_from_response
 
 load_dotenv()
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
-def _extract_answer_from_response(predicted_answer):
-        """
-        Extracts content within <answer></answer> tags or from \\box{}/\\boxed{} format using regex.
-        """
-        # Attempt to match <answer></answer> tags
-        answer_pattern = r'<answer>(.*?)</answer>'
-        match = re.search(answer_pattern, predicted_answer, re.DOTALL | re.IGNORECASE)
-
-        if match:
-            return match.group(1).strip()
-
-        # Try to match \\boxed{} format (preferred for math/classification)
-        boxed_pattern = r'\\boxed\{([^}]*)\}'
-        boxed_match = re.search(boxed_pattern, predicted_answer)
-
-        if boxed_match:
-            return boxed_match.group(1).strip()
-
-        # If \\boxed{} not found, try to match \\box{} format for backwards compatibility
-        box_pattern = r'\\box\{([^}]*)\}'
-        box_match = re.search(box_pattern, predicted_answer)
-
-        if box_match:
-            return box_match.group(1).strip()
-
-        # If none of the above patterns found, return the original answer
-        return predicted_answer.strip()
-
 
 class AgentResultsEvaluator:
     """

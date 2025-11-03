@@ -23,7 +23,7 @@ from verl.workers.reward_manager import register
 from openai import OpenAI
 
 # Add import for memory agent bench evaluation
-from memalpha.llm_agent.metrics import evaluate_wrt_source
+from memalpha.llm_agent.metrics import evaluate_wrt_source, _extract_answer_from_response
 
 
 SYSTEM_PROMPT = """
@@ -177,34 +177,6 @@ class NaiveRewardManager:
             api_key="EMPTY"
         )
 
-    def _extract_answer_from_response(self, predicted_answer):
-        """
-        Extracts content within <answer></answer> tags or from \\box{}/\\boxed{} format using regex.
-        """
-        # Attempt to match <answer></answer> tags
-        answer_pattern = r'<answer>(.*?)</answer>'
-        match = re.search(answer_pattern, predicted_answer, re.DOTALL | re.IGNORECASE)
-
-        if match:
-            return match.group(1).strip()
-
-        # Try to match \\boxed{} format (preferred for math/classification)
-        boxed_pattern = r'\\boxed\{([^}]*)\}'
-        boxed_match = re.search(boxed_pattern, predicted_answer)
-
-        if boxed_match:
-            return boxed_match.group(1).strip()
-
-        # If \\boxed{} not found, try to match \\box{} format for backwards compatibility
-        box_pattern = r'\\box\{([^}]*)\}'
-        box_match = re.search(box_pattern, predicted_answer)
-
-        if box_match:
-            return box_match.group(1).strip()
-
-        # If none of the above patterns found, return the original answer
-        return predicted_answer.strip()
-
     def _compute_score_for_data_source(self, data_source, predicted_answer, gold_answer, question=None):
         """Compute evaluation score based on data source using the same logic as long_context_eval.py."""
 
@@ -225,7 +197,7 @@ class NaiveRewardManager:
 
         elif data_source == 'pubmed-rct' or 'ttl_train' in data_source or 'icl' in data_source:
             # PUBMED dataset evaluation: MUST be ONLY a single digit
-            extracted_answer = self._extract_answer_from_response(predicted_answer)
+            extracted_answer = _extract_answer_from_response(predicted_answer)
 
             # Remove quotes and strip whitespace
             extracted_answer = extracted_answer.strip('"\'').strip()
