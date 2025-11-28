@@ -119,10 +119,24 @@ bash scripts/train_memory_grpo_qwen3-4b-4node-compression0.4-content0.1.sh
 
 ### Running the Memory Server
 
-Before evaluation, start the memory server that manages the memory system:
+1. If you deploy Qwen3-32B using vllm without any API_KEY, then you simply need to set the following environmental variable:
+```bash
+QWEN_URL="http://localhost:8001/v1" # replace with your qwen url. 
+QWEN_MODEL_NAME="qwen3-32b" # replace with your qwen model. 
+``` 
+
+If you want to use `openrouter`, then configure your `.env` (or shell) with the OpenRouter credentials. You only need the API key plus the Qwen endpoint/model:
 
 ```bash
-python memory_server.py --port 5006 --server_url http://localhost:8001/v1
+OPENROUTER_API_KEY=sk-...
+QWEN_URL="https://openrouter.ai/api/v1"      # copy the base URL from OpenRouter
+QWEN_MODEL_NAME="qwen/qwen3-32b"             # optional override (defaults to qwen3-32b)
+```
+
+2. Start the memory server (no extra flags needed unless you want to override the base URL for a custom endpoint):
+
+```bash
+python memory_server.py --port 5005
 ```
 
 ### Evaluating Trained Models

@@ -111,7 +111,27 @@ def parse_args():
     parser.add_argument("--agentic_search", action="store_true", help="Use agentic memory search instead of simple batch processing")
     parser.add_argument("--rollout_label", type=str, default=None, help="Label to append to output directory path, e.g., rollout_1")
     parser.add_argument("--force_reanswer_questions", action="store_true", help="Force reanswering all questions even if results file already exists")
-    return parser.parse_args()
+    parser.add_argument(
+        "--exclude_memory",
+        nargs='*',
+        default=[],
+        help="Space or comma separated list of memory components to disable. Choose from: core, episodic, semantic."
+    )
+
+    args = parser.parse_args()
+    allowed_memory_types = {"core", "semantic", "episodic"}
+    normalized_exclusions = []
+    for entry in args.exclude_memory:
+        # Allow comma separated values in addition to whitespace separation
+        parts = [part.strip().lower() for part in entry.split(",") if part.strip()]
+        normalized_exclusions.extend(parts)
+
+    invalid = sorted(set(normalized_exclusions) - allowed_memory_types)
+    if invalid:
+        parser.error(f"Invalid memory types for --exclude_memory: {', '.join(invalid)}. Allowed values: core, semantic, episodic.")
+
+    args.exclude_memory = set(normalized_exclusions)
+    return args
 
 def run_with_chunks_and_questions_batch(
         args,
@@ -128,7 +148,13 @@ def run_with_chunks_and_questions_batch(
 
     # Get including_core parameter from agent_config, default to False
     # including_core = agent_config.get('including_core', False)
-    batch_memories = [Memory(including_core=prompts_wrt_datasource[batch_sources[idx]]['including_core']) for idx in range(batch_size)]
+    batch_memories = [
+        Memory(
+            including_core=prompts_wrt_datasource[batch_sources[idx]]['including_core'],
+            disabled_memory_types=args.exclude_memory
+        )
+        for idx in range(batch_size)
+    ]
     memory_agent_template = MemoryAgent(agent_config=agent_config)
 
     # Check if agent_state.json exists for all batch items
@@ -152,6 +178,9 @@ def run_with_chunks_and_questions_batch(
 
         if not agent_config['enable_thinking']:
             out_dir = out_dir + "_no_thinking"
+
+        if args.exclude_memory:
+            out_dir = out_dir + "_exclude_" + "_".join(args.exclude_memory)
 
         # Add max_new_tokens to the directory name
         max_new_tokens = agent_config.get('max_new_tokens', 2048)
@@ -187,17 +216,34 @@ def run_with_chunks_and_questions_batch(
             # Only restore core memory if it's available in the memory object
             if memory.including_core and memory.core is not None:
                 memory.core = state.get('core', [])
-            memory.semantic = state['semantic']
-            memory.episodic = state['episodic']
-            memory.semantic_embedding_ids = state.get('semantic_embedding_ids', [])
-            memory.episodic_embedding_ids = state.get('episodic_embedding_ids', [])
+
+            if memory.is_memory_type_enabled('semantic'):
+                memory.semantic = state.get('semantic', [])
+                memory.semantic_embedding_ids = state.get('semantic_embedding_ids', [])
+            else:
+                memory.semantic = []
+                memory.semantic_embedding_ids = []
+
+            if memory.is_memory_type_enabled('episodic'):
+                memory.episodic = state.get('episodic', [])
+                memory.episodic_embedding_ids = state.get('episodic_embedding_ids', [])
+            else:
+                memory.episodic = []
+                memory.episodic_embedding_ids = []
 
             # Load embeddings if available
             embeddings_file = f"{out_dir}/embeddings.npz"
             if os.path.exists(embeddings_file):
                 embeddings = np.load(embeddings_file)
-                memory.semantic_embedding_matrix = embeddings['semantic_matrix']
-                memory.episodic_embedding_matrix = embeddings['episodic_matrix']
+                if memory.is_memory_type_enabled('semantic'):
+                    memory.semantic_embedding_matrix = embeddings['semantic_matrix']
+                else:
+                    memory.semantic_embedding_matrix = np.array([])
+
+                if memory.is_memory_type_enabled('episodic'):
+                    memory.episodic_embedding_matrix = embeddings['episodic_matrix']
+                else:
+                    memory.episodic_embedding_matrix = np.array([])
             else:
                 memory.semantic_embedding_matrix = np.array([])
                 memory.episodic_embedding_matrix = np.array([])
@@ -731,6 +777,10 @@ def main():
     if 'enable_thinking' in agent_config:
         print(f"  Enable thinking: {agent_config['enable_thinking']}")
     print(f"  Save process (Qwen only): {args.save_process}")
+    if args.exclude_memory:
+        print(f"  Disabled memories: {', '.join(sorted(args.exclude_memory))}")
+    else:
+        print(f"  Disabled memories: None")
 
     conversation_creator = ConversationCreator(args.dataset, args.chunk_size)
 

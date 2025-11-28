@@ -37,6 +37,7 @@ class ToolFunction: # Provide unified interface for defining tool functions and 
         """
         properties = {}
         required = []
+        skip_tool = False
         
         for param in cls.parameters:
             param_schema = {
@@ -49,14 +50,31 @@ class ToolFunction: # Provide unified interface for defining tool functions and 
                 enum_values = param.enum.copy()
                 # If this is a memory_type parameter and memory is provided, filter based on including_core
                 if param.name == "memory_type" and memory is not None:
-                    if not memory.including_core and "core" in enum_values:
-                        enum_values.remove("core")
+                    filtered_enum = []
+                    for enum_value in enum_values:
+                        base_type = enum_value.replace("_memory", "")
+                        is_enabled = True
+                        if hasattr(memory, "is_memory_type_enabled"):
+                            is_enabled = memory.is_memory_type_enabled(base_type)
+                        elif base_type == "core":
+                            is_enabled = getattr(memory, "including_core", False)
+                        if is_enabled:
+                            filtered_enum.append(enum_value)
+                    enum_values = filtered_enum
+
+                    if not enum_values:
+                        skip_tool = True
+                        break
+
                 param_schema["enum"] = enum_values
             
             properties[param.name] = param_schema
             if param.required:
                 required.append(param.name)
         
+        if skip_tool:
+            return None
+
         return {
             "type": "function",
             "function": {
@@ -224,11 +242,21 @@ FUNCTION_IMPLS = { # Map classmethod to tool names
 # Generate the OpenAI tool schemas - these functions now require a memory instance
 def get_memory_tool_schemas(memory: Memory) -> List[Dict[str, Any]]:
     """Generate OpenAI tool schemas for memory functions based on memory configuration."""
-    return [func.to_schema(memory) for func in MEMORY_TOOL_FUNCTIONS]
+    schemas = []
+    for func in MEMORY_TOOL_FUNCTIONS:
+        schema = func.to_schema(memory)
+        if schema is not None:
+            schemas.append(schema)
+    return schemas
 
 def get_search_tool_schemas(memory: Memory) -> List[Dict[str, Any]]:
     """Generate OpenAI tool schemas for search functions based on memory configuration."""
-    return [func.to_schema(memory) for func in SEARCH_TOOL_FUNCTIONS]
+    schemas = []
+    for func in SEARCH_TOOL_FUNCTIONS:
+        schema = func.to_schema(memory)
+        if schema is not None:
+            schemas.append(schema)
+    return schemas
 
 # Backward compatibility - these will work but won't respect including_core configuration
 MEMORY_TOOL_SCHEMAS = [ # Map classmethod to OpenAI tool schemas

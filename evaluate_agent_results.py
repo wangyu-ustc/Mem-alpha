@@ -26,9 +26,10 @@ class AgentResultsEvaluator:
         # Initialize ROUGE scorer for booksum evaluation
         self.rouge_scorer = rouge_scorer.RougeScorer(['rouge1', 'rouge2', 'rougeL'], use_stemmer=True)
         self.client = OpenAI(
-            base_url=os.getenv("QWEN_API_BASE"),
-            api_key="EMPTY"
+            base_url=os.getenv("QWEN_URL"),
+            api_key=os.getenv("OPENROUTER_API_KEY", "EMPTY")
         )
+        self.qwen_model = os.getenv("QWEN_MODEL_NAME")
 
     def _compute_rouge_score(self, prediction: str, reference: str) -> float:
         """Compute ROUGE score between prediction and reference text."""
@@ -106,7 +107,7 @@ class AgentResultsEvaluator:
             prompt = template.format(question, gold_answer, predicted_answer)
 
             response = self.client.chat.completions.create(
-                model='qwen3-32b',
+                model=self.qwen_model,
                 messages=[{"role": "user", "content": prompt}],
                 extra_body={
                     "chat_template_kwargs": {"enable_thinking": False},

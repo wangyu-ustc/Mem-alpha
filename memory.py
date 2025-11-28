@@ -23,7 +23,16 @@ class Memory:
     MODEL = "gpt-4.1-mini"  # Same model as agent.py
     TOPK = 20
 
-    def __init__(self, including_core: bool = False) -> None:
+    def __init__(self, including_core: bool = False, disabled_memory_types: List[str] = None) -> None:
+        disabled_memory_types = disabled_memory_types or []
+        normalized_disabled = {mem_type.lower() for mem_type in disabled_memory_types}
+        invalid = normalized_disabled - {"core", "semantic", "episodic"}
+        if invalid:
+            raise ValueError(f"Invalid memory types to disable: {', '.join(sorted(invalid))}")
+
+        self.disabled_memory_types = normalized_disabled
+        including_core = including_core and "core" not in self.disabled_memory_types
+
         if including_core:
             self.core: str = ""  # Changed to simple string
         else:
@@ -39,14 +48,41 @@ class Memory:
         self.episodic_embedding_ids: List[str] = []
         self.including_core = including_core
 
+    def is_memory_type_enabled(self, memory_type: str) -> bool:
+        """Check if a memory type is enabled for this run."""
+        memory_type = memory_type.lower()
+        if memory_type == "core":
+            return self.including_core
+        if memory_type in {"semantic", "episodic"}:
+            return memory_type not in self.disabled_memory_types
+        raise ValueError(f"Unknown memory type: {memory_type}")
+
+    def get_enabled_memory_types(self) -> List[str]:
+        """Return a list of enabled memory types."""
+        enabled = []
+        if self.is_memory_type_enabled("core"):
+            enabled.append("core")
+        if self.is_memory_type_enabled("semantic"):
+            enabled.append("semantic")
+        if self.is_memory_type_enabled("episodic"):
+            enabled.append("episodic")
+        return enabled
+
+    def _ensure_memory_type_enabled(self, memory_type: str):
+        """Raise if a memory type is disabled."""
+        if not self.is_memory_type_enabled(memory_type):
+            raise ValueError(f"{memory_type.capitalize()} memory is disabled for this run.")
+
     def total_length(self):
         total_length = 0
-        if self.core is not None:
+        if self.is_memory_type_enabled("core") and self.core is not None:
             # Core is now a simple string
             total_length += count_tokens(self.core)
         
         # Handle semantic and episodic memories
         for mem_type, mem_list in [("semantic", self.semantic), ("episodic", self.episodic)]:
+            if not self.is_memory_type_enabled(mem_type):
+                continue
             for mem_idx, mem in enumerate(mem_list):
                 for mem_id, content in mem.items():
                     # Debug: Check if content is problematic with detailed info
@@ -139,66 +175,96 @@ class Memory:
                 - "rethink": For memory consolidation and reorganization
         """
         
+        query = query or ""
+        semantic_enabled = self.is_memory_type_enabled("semantic")
+        episodic_enabled = self.is_memory_type_enabled("episodic")
+
         max_num_of_recent_chunks = max_num_of_recent_chunks if max_num_of_recent_chunks is not None else self.MAX_MEMORY_ITEMS
         if max_num_of_recent_chunks > 0:
-            # If max_num_of_recent_chunks is larger than actual memory count, use all memories
-            if max_num_of_recent_chunks >= len(self.semantic):
-                semantic_items = self.semantic
+            if semantic_enabled:
+                if max_num_of_recent_chunks >= len(self.semantic):
+                    semantic_items = self.semantic
+                else:
+                    semantic_items = self.semantic[-max_num_of_recent_chunks:]
             else:
-                semantic_items = self.semantic[-max_num_of_recent_chunks:]
-                
-            if max_num_of_recent_chunks >= len(self.episodic):
-                episodic_items = self.episodic
+                semantic_items = []
+
+            if episodic_enabled:
+                if max_num_of_recent_chunks >= len(self.episodic):
+                    episodic_items = self.episodic
+                else:
+                    episodic_items = self.episodic[-max_num_of_recent_chunks:]
             else:
-                episodic_items = self.episodic[-max_num_of_recent_chunks:]
+                episodic_items = []
         else:
             episodic_items = []
             semantic_items = []
         
         # Handle core memory based on including_core flag
+        core_memory_section = ""
         if self.including_core and self.core is not None:
-            core_block = self._block('core_memory', content=self.core)
-            memory_blocks = (
-                f"{core_block}\n\n"
-                f"{self._block('semantic_memory', semantic_items)}\n\n"
-                f"{self._block('episodic_memory', episodic_items)}"
-            )
+            core_memory_section = f"<core_memory>\n{self.core}\n</core_memory>"
+        
+        memory_blocks_sections = []
+        if core_memory_section:
+            memory_blocks_sections.append(core_memory_section)
+        if semantic_enabled:
+            memory_blocks_sections.append(self._block('semantic_memory', semantic_items))
+        if episodic_enabled:
+            memory_blocks_sections.append(self._block('episodic_memory', episodic_items))
+        if memory_blocks_sections:
+            memory_blocks = "\n\n".join(memory_blocks_sections)
         else:
-            memory_blocks = (
-                f"{self._block('semantic_memory', semantic_items)}\n\n"
-                f"{self._block('episodic_memory', episodic_items)}"
-            )
+            memory_blocks = "No memories are currently enabled."
         
         if status == "memorie":
             # System prompt for memorizing mode - focus on understanding and storing information
-            core_memory_section = ""
-            if self.including_core and self.core is not None:
-                core_memory_section = f"""
-<core_memory>
-{self.core}
-</core_memory>
-"""
-            
+            memory_type_instructions = []
+            if self.is_memory_type_enabled("core"):
+                memory_type_instructions.append("* core_memory: Information stored so far (stored as a compact paragraph)")
+            if semantic_enabled:
+                memory_type_instructions.append("* semantic_memory: General knowledge, factual or conceptual information")
+            if episodic_enabled:
+                memory_type_instructions.append("* episodic_memory: Specific personal experiences or events with timestamp (mandatory), place, or context")
+            if not memory_type_instructions:
+                memory_type_instructions.append("* No memory modules are enabled for this run.")
+
+            memory_state_sections = []
+            if core_memory_section:
+                memory_state_sections.append(core_memory_section)
+            if semantic_enabled:
+                total_semantic = len(self.semantic)
+                visible_semantic = min(len(semantic_items), total_semantic)
+                memory_state_sections.append(
+                    f"<semantic_memory> (Only show the most recent {visible_semantic} out of {total_semantic} memories)\n"
+                    f"{self._block(lines=semantic_items)}\n"
+                    f"</semantic_memory>"
+                )
+            if episodic_enabled:
+                total_episodic = len(self.episodic)
+                visible_episodic = min(len(episodic_items), total_episodic)
+                memory_state_sections.append(
+                    f"<episodic_memory> (Only show the most recent {visible_episodic} out of {total_episodic} memories)\n"
+                    f"{self._block(lines=episodic_items)}\n"
+                    f"</episodic_memory>"
+                )
+            if not memory_state_sections:
+                memory_state_sections.append("No memory modules are enabled for this run.")
+
+            memory_state_text = "\n\n".join(memory_state_sections)
+            instructions_text = "\n".join(memory_type_instructions)
+
             system_prompt = (f'''You are a personal assistant with a sophisticated memory system. Your primary task is to carefully analyze, understand, and memorize the information provided by the user.
 
 MEMORIZING MODE INSTRUCTIONS:
 - Read and understand all information shared by the user
 - Identify key facts, concepts, and relationships
 - Store important information using the appropriate memory type:
-{"* core_memory: Information stored so far (stored as a compact paragraph)" if self.including_core else ""}
-* semantic_memory: General knowledge, factual or conceptual information
-* episodic_memory: Specific personal experiences or events with timestamp (mandatory), place, or context
+{instructions_text}
 - Use these cues to decide memory type based on content
 
 CURRENT MEMORY STATE:
-{core_memory_section}
-<semantic_memory> (Only show the most recent {min(len(semantic_items), len(self.semantic))} out of {len(self.semantic)} memories)
-{self._block(lines=semantic_items)}
-</semantic_memory>
-
-<episodic_memory> (Only show the most recent {min(len(episodic_items), len(self.episodic))} out of {len(self.episodic)} memories)
-{self._block(lines=episodic_items)}
-</episodic_memory>
+{memory_state_text}
 
 Focus on understanding and memorizing. Use memory tools actively to store new information.
 Since this is the memorization process, if you think all the information has been memorized, you can respond with 'Done'. This information will not be seen by the user.
@@ -227,39 +293,59 @@ CONSOLIDATION OBJECTIVES:
 
         else:  # status == "chat"
             # System prompt for answering mode - focus on retrieving and using stored information
-            # Check if we're showing all memories or just recent ones
-            showing_all_semantic = len(semantic_items) == len(self.semantic)
-            showing_all_episodic = len(episodic_items) == len(self.episodic)
+            showing_all_semantic = True if not semantic_enabled else len(semantic_items) == len(self.semantic)
+            showing_all_episodic = True if not episodic_enabled else len(episodic_items) == len(self.episodic)
             
-            if showing_all_semantic and showing_all_episodic:
-                semantic_desc = f"All {len(self.semantic)} semantic memories"
-                episodic_desc = f"All {len(self.episodic)} episodic memories"
-                search_instructions = "All memories are available in the context. You can directly use the information to answer the query."
+            semantic_section = ""
+            if semantic_enabled:
+                if showing_all_semantic:
+                    semantic_desc = f"All {len(self.semantic)} semantic memories"
+                else:
+                    semantic_desc = f"Only show the most relevant {len(semantic_items)} out of {len(self.semantic)} memories retrieved using bm25 search with the query '''{query}'''"
+                semantic_section = (
+                    f"<semantic_memory> ({semantic_desc})\n"
+                    f"{self._block(lines=semantic_items)}\n"
+                    f"</semantic_memory>"
+                )
+
+            episodic_section = ""
+            if episodic_enabled:
+                if showing_all_episodic:
+                    episodic_desc = f"All {len(self.episodic)} episodic memories"
+                else:
+                    episodic_desc = f"Only show the most relevant {len(episodic_items)} out of {len(self.episodic)} memories retrieved using bm25 search with the query '''{query}'''"
+                episodic_section = (
+                    f"<episodic_memory> ({episodic_desc})\n"
+                    f"{self._block(lines=episodic_items)}\n"
+                    f"</episodic_memory>"
+                )
+
+            memory_sections = [section for section in [semantic_section, episodic_section] if section]
+            if not memory_sections:
+                memory_sections.append("Semantic and episodic memories are disabled for this run.")
+            memory_section_text = "\n\n".join(memory_sections)
+
+            all_visible = ((not semantic_enabled) or showing_all_semantic) and ((not episodic_enabled) or showing_all_episodic)
+            if semantic_enabled or episodic_enabled:
+                if all_visible:
+                    search_instructions = "All enabled memories are available in the context. You can directly use the information to answer the query."
+                else:
+                    search_instructions = "If you want to look closer or conduct more searches, you can adjust the query and call the `search_memory` function again. You can also set search_method as 'text-embedding' to use embedding similarity search. Be an active searcher and try to use all kinds of queries and search methods to find the results. Do not easily give up."
             else:
-                semantic_desc = f"Only show the most relevant {len(semantic_items)} out of {len(self.semantic)} memories retrieved using bm25 search with the query '''{query}'''"
-                episodic_desc = f"Only show the most relevant {len(episodic_items)} out of {len(self.episodic)} memories retrieved using bm25 search with the query '''{query}'''"
-                search_instructions = "If you want to look closer or conduct more searches, you can adjust the query and call the `search_memory` function again. You can also set search_method as 'text-embedding' to use embedding similarity search. Be an active searcher and try to use all kinds of queries and search methods to find the results. Do not easily give up."
-            
-            core_memory_section = ""
-            if self.including_core and self.core is not None:
-                core_memory_section = f"""
-<core_memory>
-{self.core}
-</core_memory>
-"""
-            
+                search_instructions = "Semantic and episodic memories are disabled for this run."
+
+            combined_memory_text = memory_section_text
+            if core_memory_section:
+                if combined_memory_text:
+                    combined_memory_text = f"{core_memory_section}\n\n{combined_memory_text}"
+                else:
+                    combined_memory_text = core_memory_section
+
             system_prompt = (
                 "You are a reasoning assistant. For each incoming query or task—whether it's a question, command, or summary request—"
                 "use the structured memory below to retrieve and synthesize relevant information to produce your response.\n\n"
                 f"""Based on the query {query}, the following are the retrieved memories:
-{core_memory_section}
-<semantic_memory> ({semantic_desc})
-{self._block(lines=semantic_items)}
-</semantic_memory>
-
-<episodic_memory> ({episodic_desc})
-{self._block(lines=episodic_items)}
-</episodic_memory>
+{combined_memory_text}
 
 {search_instructions}"""
             )
@@ -272,6 +358,9 @@ CONSOLIDATION OBJECTIVES:
     # --------------------------------------------------
     def new_memory_insert(self, memory_type: str, content: str):
         """Insert a new memory with a unique ID. Skips insertion if content already exists."""
+        if memory_type in ['semantic', 'episodic']:
+            self._ensure_memory_type_enabled(memory_type)
+
         # Check if trying to insert core memory when core is not available
         if memory_type == 'core' and not self.including_core:
             raise ValueError("Core memory is not available. Set including_core=True to use core memory.")
@@ -308,6 +397,9 @@ CONSOLIDATION OBJECTIVES:
 
     def memory_update(self, memory_type: str, new_content: str, memory_id: str=None):
         """Update a memory by its ID."""
+        if memory_type in ['semantic', 'episodic']:
+            self._ensure_memory_type_enabled(memory_type)
+
         # Check if trying to update core memory when core is not available
         if memory_type == 'core' and not self.including_core:
             raise ValueError("Core memory is not available. Set including_core=True to use core memory.")
@@ -360,6 +452,9 @@ CONSOLIDATION OBJECTIVES:
 
     def memory_delete(self, memory_type: str, memory_id: str = None):
         """Delete a memory by its ID. For core memory, clears the entire content if no memory_id is provided."""
+        if memory_type in ['semantic', 'episodic']:
+            self._ensure_memory_type_enabled(memory_type)
+
         # Check if trying to delete core memory when core is not available
         if memory_type == 'core' and not self.including_core:
             raise ValueError("Core memory is not available. Set including_core=True to use core memory.")
@@ -422,6 +517,8 @@ CONSOLIDATION OBJECTIVES:
         # For semantic and episodic memories only
         if memory_type not in ['semantic', 'episodic']:
             raise ValueError(f"Invalid memory_type: {memory_type}. Only 'semantic' and 'episodic' are supported for searching.")
+        
+        self._ensure_memory_type_enabled(memory_type)
         
         mem_list = getattr(self, memory_type)
         if not mem_list or not query.strip():

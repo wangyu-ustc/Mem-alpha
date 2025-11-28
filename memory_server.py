@@ -11,11 +11,13 @@ import json
 import logging
 import argparse
 import re
+import multiprocessing
 from typing import List, Dict, Any, Tuple
 from flask import Flask, request, jsonify
 from openai import OpenAI, AzureOpenAI
 from transformers import AutoTokenizer
 import dotenv
+from openrouter_worker import init_openrouter_worker, run_openrouter_completion
 
 # Load environment variables
 dotenv.load_dotenv()
@@ -66,7 +68,6 @@ class MemoryProcessor:
         self.model = MODEL_NAME
 
         if self.model == "qwen3-32b":
-            # Qwen model configuration - use provided server_url or default
             if server_url:
                 base_url = server_url
             else:
@@ -74,9 +75,9 @@ class MemoryProcessor:
 
             self.client = OpenAI(
                 base_url=base_url,
-                api_key="EMPTY"
+                api_key=os.getenv("OPENROUTER_API_KEY", "EMPTY")
             )
-            self.model_name = "qwen3-32b"  # The actual model name for API calls
+            self.model_name = os.getenv("QWEN_MODEL_NAME")
 
             # Initialize tokenizer for prompt conversion
             self.tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-32B")
@@ -677,8 +678,6 @@ INSTRUCTIONS:
 
                         logger.info(f"  Searching {memory_type} memory with query: '{query}' (initial_top_k={initial_top_k}, final_top_k={final_top_k})")
 
-                        import ipdb; ipdb.set_trace()
-
                         # Perform the search
                         if memory_type in ['semantic', 'episodic']:
                             search_results = self.search_memories(
@@ -950,15 +949,6 @@ def _process_function_batch(data):
                 tool_name = item.get('name')
                 tool_arguments = item.get('arguments', {})
                 tool_success = item.get('success', None)
-
-                # if tool_success:
-                #     if not tool_success:
-                #         item_analyses[i] = {
-                #             "error": "Tool Call Failed",
-                #             "is_valid": False,
-                #             "score": 0.0
-                #         }
-                #         continue
 
                 if not tool_name or not tool_arguments:
                     item_analyses[i] = {
@@ -1537,11 +1527,15 @@ def batch_process():
                 structure_info.append((mem_idx, q_idx))
 
         # Perform batch inference
-        if processor.model == "qwen3-32b" and processor.tokenizer is not None:
+        if "qwen3-32b" in processor.model and processor.tokenizer is not None:
             # For Qwen model, use completions API with converted prompts
             # Process in mini-batches to avoid API limits
             batch_size = qwen_batch_size  # Maximum batch size for Qwen API
             all_results = []
+
+            base_url_obj = getattr(processor.client, "base_url", "")
+            base_url_str = str(base_url_obj) if base_url_obj else ""
+            is_openrouter = bool(base_url_str) and "openrouter" in base_url_str.lower()
 
             if len(all_prompts) > batch_size:
                 # Process in mini-batches
@@ -1556,16 +1550,37 @@ def batch_process():
 
                     try:
 
-                        resp = processor.client.completions.create(
-                            model=processor.model_name,
-                            prompt=batch_prompts,
-                            max_tokens=max_tokens,
-                            temperature=temperature,
-                            stream=False
-                        )
+                        if is_openrouter:
+                            openrouter_api_key = os.getenv("OPENROUTER_API_KEY", "EMPTY")
+                            cpu_total = os.cpu_count() or 1
+                            max_workers = max(1, min(len(batch_prompts), max(cpu_total - 1, 1)))
+                            task_args = [
+                                (prompt, max_tokens, temperature) for prompt in batch_prompts
+                            ]
+                            ctx = multiprocessing.get_context("spawn")
+                            with ctx.Pool(
+                                processes=max_workers,
+                                initializer=init_openrouter_worker,
+                                initargs=(
+                                    base_url_str,
+                                    openrouter_api_key,
+                                    processor.model_name,
+                                ),
+                            ) as pool:
+                                batch_results = pool.map(run_openrouter_completion, task_args)
 
-                        # Extract results from this batch
-                        batch_results = [choice.text for choice in resp.choices]
+                        else:
+                            resp = processor.client.completions.create(
+                                model=processor.model_name,
+                                prompt=batch_prompts,
+                                max_tokens=max_tokens,
+                                temperature=temperature,
+                                stream=False
+                            )
+
+                            # Extract results from this batch
+                            batch_results = [choice.text for choice in resp.choices]
+
                         all_results.extend(batch_results)
 
                     except Exception as e:
@@ -1575,16 +1590,31 @@ def batch_process():
             else:
                 # Process all at once if batch size is acceptable
                 logger.info(f"Processing {len(all_prompts)} prompts in single batch")
-                resp = processor.client.completions.create(
-                    model=processor.model_name,
-                    prompt=all_prompts,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    stream=False
-                )
+                if is_openrouter:
+                    openrouter_api_key = os.getenv("OPENROUTER_API_KEY", "EMPTY")
+                    cpu_total = os.cpu_count() or 1
+                    max_workers = max(1, min(len(all_prompts), max(cpu_total - 1, 1)))
+                    task_args = [
+                        (prompt, max_tokens, temperature) for prompt in all_prompts
+                    ]
+                    ctx = multiprocessing.get_context("spawn")
+                    with ctx.Pool(
+                        processes=max_workers,
+                        initializer=init_openrouter_worker,
+                        initargs=(base_url_str, openrouter_api_key, processor.model_name),
+                    ) as pool:
+                        all_results = pool.map(run_openrouter_completion, task_args)
+                else:
+                    resp = processor.client.completions.create(
+                        model=processor.model_name,
+                        prompt=all_prompts,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        stream=False
+                    )
 
-                # Extract results from response
-                all_results = [choice.text for choice in resp.choices]
+                    # Extract results from response
+                    all_results = [choice.text for choice in resp.choices]
         else:
             # For Azure OpenAI models, process with mini-batching support
             batch_size = azure_batch_size  # Conservative batch size for Azure OpenAI
