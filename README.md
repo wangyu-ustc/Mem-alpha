@@ -194,6 +194,11 @@ python inference/generate_rollout.py \
     --model Mem-Lab/Qwen2.5-7B-RL-RAG-Q2-EM-Release \
     --use_mem1 \
     --data_file ../../data/memoryagentbench/test.parquet
+
+# For the results reported in this repo, we load the MEM1 rollouts via our evaluator by setting the model to `mem1`:
+# (requires `MEM1/Mem1/<dataset>_results.json` produced by the commands above)
+python long_context_eval.py --model mem1 --dataset memalpha
+python long_context_eval.py --model mem1 --dataset memoryagentbench
 ```
 
 ## Dataset Processing
