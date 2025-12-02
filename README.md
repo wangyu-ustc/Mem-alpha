@@ -8,22 +8,27 @@ Official implementation of **"Mem-α: Learning Memory Construction via Reinforce
 
 ## Table of Contents
 
-- [Overview](#overview)
-- [Installation](#installation)
-- [Dataset Preparation](#dataset-preparation)
-- [Training](#training)
-  - [Main Model](#main-model)
-  - [Ablation Studies](#ablation-studies)
-- [Evaluation](#evaluation)
-  - [Running the Memory Server](#running-the-memory-server)
-  - [Evaluating Trained Models](#evaluating-trained-models)
-  - [Baseline Evaluations](#baseline-evaluations)
-- [Dataset Processing](#dataset-processing)
-  - [Memalpha Dataset](#memalpha-dataset)
-  - [MemoryAgentBench Dataset](#memoryagentbench-dataset)
-- [Citation](#citation)
-- [Acknowledgments](#acknowledgments)
-- [License](#license)
+- [Mem-α: Learning Memory Construction via Reinforcement Learning](#mem-α-learning-memory-construction-via-reinforcement-learning)
+  - [Table of Contents](#table-of-contents)
+  - [Overview](#overview)
+  - [Installation](#installation)
+  - [Dataset Preparation](#dataset-preparation)
+    - [Prerequisites: Install Git LFS](#prerequisites-install-git-lfs)
+    - [Download Datasets](#download-datasets)
+  - [Training](#training)
+    - [Main Model](#main-model)
+    - [Ablation Studies](#ablation-studies)
+  - [Evaluation](#evaluation)
+    - [Running the Memory Server](#running-the-memory-server)
+    - [Evaluating Trained Models](#evaluating-trained-models)
+    - [Baseline Evaluations](#baseline-evaluations)
+      - [Long-Context, RAG Baselines and MemAgent](#long-context-rag-baselines-and-memagent)
+      - [MEM1 Baseline](#mem1-baseline)
+  - [Dataset Processing](#dataset-processing)
+    - [Memalpha Dataset](#memalpha-dataset)
+    - [MemoryAgentBench Dataset](#memoryagentbench-dataset)
+  - [Citation](#citation)
+  - [License](#license)
 
 ## Overview
 
@@ -55,15 +60,40 @@ pip install -r requirements.txt
 
 ## Dataset Preparation
 
+### Prerequisites: Install Git LFS
+
+The datasets are stored using Git Large File Storage (LFS). Before downloading, you need to install Git LFS:
+
+```bash
+# macOS
+brew install git-lfs
+
+# Ubuntu/Debian
+sudo apt-get install git-lfs
+
+# Install for your user account
+git lfs install
+```
+
+### Download Datasets
+
 Create a `data` folder in the project root and download the datasets:
 
 ```bash
 # Download Memalpha training/test dataset
 git clone https://huggingface.co/datasets/YuWangX/Memalpha ./data/memalpha
+cd ./data/memalpha
+git lfs pull  # Pull the actual dataset files (not just LFS pointers)
+cd ../..
 
 # Download MemoryAgentBench evaluation dataset (processed version for this project)
 git clone https://huggingface.co/datasets/YuWangX/Memalpha-Memoryagentbench ./data/memoryagentbench
+cd ./data/memoryagentbench
+git lfs pull  # Pull the actual dataset files
+cd ../..
 ```
+
+> **⚠️ Important:** Without Git LFS installed, you'll only download small pointer files (~133 bytes) instead of the actual datasets (~13-18 MB). Make sure to run `git lfs pull` after cloning to download the real data files.
 
 > **Note:** We use a processed version of the [original MemoryAgentBench](https://huggingface.co/datasets/ai-hyz/MemoryAgentBench) dataset. See [Dataset Processing](#dataset-processing) for details.
 

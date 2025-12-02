@@ -13,8 +13,10 @@ from datetime import datetime
 from rank_bm25 import BM25Okapi
 from typing import List, Dict, Any
 from openai import AzureOpenAI, OpenAI
+import multiprocessing
 from memalpha.utils import evaluate_eurlex
 from memalpha.llm_agent.metrics import evaluate_wrt_source, _extract_answer_from_response
+from openrouter_worker import init_openrouter_worker, run_openrouter_completion
 
 import aiohttp
 import asyncio
@@ -140,18 +142,20 @@ Your answer:
         # Initialize client based on model type
         elif self.model == "qwen3-32b" or self.model == "qwen3-32b-bm25" or self.model == 'mem1':
             # Qwen model configuration
+            self.qwen_base_url = QWEN_URL
+            self.qwen_is_openrouter = bool(self.qwen_base_url) and "openrouter" in self.qwen_base_url.lower()
+            self.openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
+            if self.qwen_is_openrouter and not self.openrouter_api_key:
+                raise ValueError("OPENROUTER_API_KEY not found in environment variables for OpenRouter requests")
+
             self.client = OpenAI(
-                base_url=QWEN_URL,
-                api_key="EMPTY"
+                base_url=self.qwen_base_url,
+                api_key=self.openrouter_api_key if self.qwen_is_openrouter else "EMPTY",
             )
-            self.model_name = "qwen3-32b"  # The actual model name for API calls
+            self.model_name = os.getenv("QWEN_MODEL_NAME", "qwen3-32b")  # The actual model name for API calls
 
             # Initialize tokenizer for prompt conversion
-            if TRANSFORMERS_AVAILABLE:
-                self.tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-32B", trust_remote_code=True)
-            else:
-                raise ValueError("transformers library required for Qwen models. Install with: pip install transformers")
-
+            self.tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-32B", trust_remote_code=True)
             print("Initialized Qwen model client")
 
         else:
@@ -988,6 +992,11 @@ Your answer:
             all_prompts = []
             max_input_tokens = 30000
 
+            base_url_obj = getattr(self.client, "base_url", "")
+            base_url_str = str(base_url_obj) if base_url_obj else ""
+            is_openrouter = self.qwen_is_openrouter or ("openrouter" in base_url_str.lower())
+            openrouter_api_key = self.openrouter_api_key or os.getenv("OPENROUTER_API_KEY", "EMPTY")
+
             for messages in all_messages:
                 prompt = self.tokenizer.apply_chat_template(
                     messages,
@@ -1020,29 +1029,57 @@ Your answer:
                     total_batches = (len(all_prompts) + batch_size - 1) // batch_size
 
                     print(f"Processing mini-batch {batch_num}/{total_batches} ({len(batch_prompts)} prompts)")
-                    resp = self.client.completions.create(
-                        model=self.model_name,
-                        prompt=batch_prompts,
-                        max_tokens=max_tokens,
-                        temperature=temperature,
-                        stream=False
-                    )
-                    # Extract results from this batch
-                    batch_results = [choice.text for choice in resp.choices]
+                    if is_openrouter:
+                        cpu_total = os.cpu_count() or 1
+                        max_workers = max(1, min(len(batch_prompts), max(cpu_total - 1, 1)))
+                        task_args = [
+                            (prompt, max_tokens, temperature) for prompt in batch_prompts
+                        ]
+                        ctx = multiprocessing.get_context("spawn")
+                        with ctx.Pool(
+                            processes=max_workers,
+                            initializer=init_openrouter_worker,
+                            initargs=(base_url_str, openrouter_api_key, self.model_name),
+                        ) as pool:
+                            batch_results = pool.map(run_openrouter_completion, task_args)
+                    else:
+                        resp = self.client.completions.create(
+                            model=self.model_name,
+                            prompt=batch_prompts,
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                            stream=False
+                        )
+                        # Extract results from this batch
+                        batch_results = [choice.text for choice in resp.choices]
                     all_results.extend(batch_results)
             else:
                 # Process all at once if batch size is acceptable
                 print(f"Processing {len(all_prompts)} prompts in single batch")
-                resp = self.client.completions.create(
-                    model=self.model_name,
-                    prompt=all_prompts,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    stream=False
-                )
+                if is_openrouter:
+                    cpu_total = os.cpu_count() or 1
+                    max_workers = max(1, min(len(all_prompts), max(cpu_total - 1, 1)))
+                    task_args = [
+                        (prompt, max_tokens, temperature) for prompt in all_prompts
+                    ]
+                    ctx = multiprocessing.get_context("spawn")
+                    with ctx.Pool(
+                        processes=max_workers,
+                        initializer=init_openrouter_worker,
+                        initargs=(base_url_str, openrouter_api_key, self.model_name),
+                    ) as pool:
+                        all_results = pool.map(run_openrouter_completion, task_args)
+                else:
+                    resp = self.client.completions.create(
+                        model=self.model_name,
+                        prompt=all_prompts,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        stream=False
+                    )
 
-                # Extract results from response
-                all_results = [choice.text for choice in resp.choices]
+                    # Extract results from response
+                    all_results = [choice.text for choice in resp.choices]
 
             return all_results
 
