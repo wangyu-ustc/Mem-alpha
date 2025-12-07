@@ -1,5 +1,6 @@
 import re
 import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"  # Avoid tokenizer parallel threads before multiprocessing fork
 import sys
 import json
 import time
@@ -52,6 +53,8 @@ class LongContextEvaluator:
     def __init__(self, dataset, model_name="gpt-4o-mini", without_chunks=False, force_rescore=False):
         """Initialize the evaluator with Azure OpenAI or Qwen client"""
         self.model = model_name
+        # Track which dataset this evaluator instance is working on so checkpoints/results don't mix
+        self.dataset_name = dataset
         self.without_chunks = without_chunks
         self.force_rescore = force_rescore
         self.token_counter = AutoTokenizer.from_pretrained("Qwen/Qwen3-32B")
@@ -310,7 +313,11 @@ Your answer:
         """Get checkpoint filename based on model and data type"""
         safe_model_name = self.model.replace(".", "_").replace("-", "_")
         chunks_suffix = "_no_chunks" if self.without_chunks else "_with_chunks"
-        return os.path.join(self.checkpoint_dir, f"{safe_model_name}{chunks_suffix}_{data_type}_checkpoint.json")
+        dataset_suffix = f"_{self.dataset_name}" if getattr(self, "dataset_name", None) else ""
+        return os.path.join(
+            self.checkpoint_dir,
+            f"{safe_model_name}{chunks_suffix}{dataset_suffix}_{data_type}_checkpoint.json"
+        )
 
     def _save_checkpoint(self, results, data_type="test"):
         """Save current progress to checkpoint file with backup and atomic write"""
@@ -664,16 +671,7 @@ Your answer:
 
             return 1.0 if answer_text.lower() in predicted_answer.lower() else 0.0
 
-        elif data_source == 'cr_train':
-            # CR Train dataset - factual Q&A evaluation using containment
-            if isinstance(gold_answer, list):
-                answer_text = str(gold_answer[0]) if gold_answer else ""
-            else:
-                answer_text = gold_answer.get('text', gold_answer) if isinstance(gold_answer, dict) else str(gold_answer)
-
-            return 1.0 if answer_text.lower() in predicted_answer.lower() else 0.0
-
-        elif data_source == 'lme_train' or data_source.startswith('longmemeval_s'):
+        elif data_source.startswith('longmemeval_s'):
             # LME Train and LongMemEval datasets - use LLM-based evaluation for personalized responses
             template = "I will give you a question, a rubric for desired personalized response, and a response from a model. Please answer yes if the response satisfies the desired response. Otherwise, answer no. The model does not need to reflect all the points in the rubric. The response is correct as long as it recalls and utilizes the user's personal information correctly.\n\nQuestion: {}\n\nRubric: {}\n\nModel Response: {}\n\nIs the model response correct? Answer yes or no only."
             prompt = template.format(question, gold_answer, predicted_answer)
@@ -722,26 +720,33 @@ Your answer:
     def load_datasets(self, dataset="memalpha"):
         """Load the parquet datasets"""
         print(f"Loading {dataset} datasets...")
+        # Keep dataset name in sync for checkpoint/result file names
+        self.dataset_name = dataset
 
         if dataset == "memalpha":
             self.train_data = pd.read_parquet('data/memalpha/train.parquet')
             self.test_data = pd.read_parquet('data/memalpha/test.parquet')
             print(f"Loaded {len(self.train_data)} train samples, {len(self.test_data)} test samples")
 
-        elif dataset == "friends":
-            # Load the friends dataset and split 90/10
-            friends_data = pd.read_parquet('./data/memalpha/processed_friends_data.parquet')
-
-            # Split into 90% train and 10% validation
-            split_idx = int(len(friends_data) * 0.9)
-            self.train_data = friends_data[:split_idx].copy()
-            self.test_data = friends_data[split_idx:].copy()
-
-            print(f"Loaded Friends dataset: {len(self.train_data)} train samples, {len(self.test_data)} test samples")
+        elif dataset == 'squad':
+            self.train_data = pd.read_parquet('data/memalpha/train.parquet')
+            self.test_data = pd.read_parquet('data/memalpha/test.parquet')
+            self.train_data = self.train_data[self.train_data['data_source'] == 'squad']
+            self.test_data = self.test_data[self.test_data['data_source'] == 'squad']
+            print(f"Loaded Squad dataset: {len(self.train_data)} train samples, {len(self.test_data)} test samples")
+        
+        elif dataset == 'hotpotqa':
+            self.train_data = pd.read_parquet('data/memalpha/train.parquet')
+            self.test_data = pd.read_parquet('data/memalpha/test.parquet')
+            self.train_data = self.train_data[self.train_data['data_source'] == 'hotpotqa']
+            self.test_data = self.test_data[self.test_data['data_source'] == 'hotpotqa']
+            print(f"Loaded HotpotQA dataset: {len(self.train_data)} train samples, {len(self.test_data)} test samples")
 
         elif dataset == "booksum":
-            self.train_data = pd.read_parquet("./data/memalpha/booksum/train.parquet")
-            self.test_data = pd.read_parquet("./data/memalpha/booksum/test.parquet")
+            self.train_data = pd.read_parquet('data/memalpha/train.parquet')
+            self.test_data = pd.read_parquet('data/memalpha/test.parquet')
+            self.train_data = self.train_data[self.train_data['data_source'] == 'booksum']
+            self.test_data = self.test_data[self.test_data['data_source'] == 'booksum']
             print(f"Loaded BookSum dataset: {len(self.train_data)} train samples, {len(self.test_data)} test samples")
 
         elif dataset == 'long_range_understanding':
@@ -756,7 +761,8 @@ Your answer:
             self.train_data = pd.read_parquet("./data/memoryagentbench/train.parquet")
             # self.train_data = self.train_data[self.train_data['data_source'].isin(['infbench_sum_eng_shots2'])]
             self.test_data = pd.read_parquet("./data/memoryagentbench/test.parquet")
-            self.test_data = self.test_data[self.test_data['data_source'].isin(['ruler_qa1_197K', 'ruler_qa2_421K', 'longmemeval_s*'])]
+            # self.test_data = self.test_data[self.test_data['data_source'].isin(['ruler_qa1_197K', 'ruler_qa2_421K', 'longmemeval_s*'])]
+            self.test_data = self.test_data[self.test_data['data_source'].isin(['ruler_qa1_197K', 'ruler_qa2_421K'])]
             print(f"Loaded Accurate Retrieval dataset: {len(self.train_data)} train samples, {len(self.test_data)} test samples")
 
         elif dataset == 'test_time_learning':
@@ -771,30 +777,10 @@ Your answer:
             self.test_data = pd.read_parquet("./data/memoryagentbench/test.parquet")
             print(f"Loaded MemoryAgentBench dataset: {len(self.train_data)} train samples, {len(self.test_data)} test samples")
 
-        elif dataset == 'detectiveqa':
-            self.train_data = pd.read_parquet("./data/memalpha/detectiveqa/train.parquet")
-            self.test_data = pd.read_parquet("./data/memalpha/detectiveqa/test.parquet")
-            print(f"Loaded DetectiveQA dataset: {len(self.train_data)} train samples, {len(self.test_data)} test samples")
-
-        elif dataset == "arxiv-classification":
-            self.train_data = pd.read_parquet("./data/memalpha/arxiv-classification/train.parquet")
-            self.test_data = pd.read_parquet("./data/memalpha/arxiv-classification/test.parquet")
-            print(f"Loaded ArXiv Classification dataset: {len(self.train_data)} train samples, {len(self.test_data)} test samples")
-
         elif dataset == "pubmed-rct":
             self.train_data = pd.read_parquet("./data/memalpha/pubmed-rct/train.parquet")
             self.test_data = pd.read_parquet("./data/memalpha/pubmed-rct/test.parquet")
             print(f"Loaded PubMed-RCT dataset: {len(self.train_data)} train samples, {len(self.test_data)} test samples")
-
-        elif dataset == "wos46985":
-            self.train_data = pd.read_parquet("./data/memalpha/wos46985/train.parquet")
-            self.test_data = pd.read_parquet("./data/memalpha/wos46985/test.parquet")
-            print(f"Loaded WOS46985 dataset: {len(self.train_data)} train samples, {len(self.test_data)} test samples")
-
-        elif dataset == "eurlex":
-            self.train_data = pd.read_parquet("./data/memalpha/eurlex/train.parquet")
-            self.test_data = pd.read_parquet("./data/memalpha/eurlex/test.parquet")
-            print(f"Loaded EurLex dataset: {len(self.train_data)} train samples, {len(self.test_data)} test samples")
 
         elif dataset == "perltqa":
             self.train_data = pd.read_parquet('data/memalpha/train.parquet')
@@ -802,24 +788,6 @@ Your answer:
             self.test_data = pd.read_parquet('data/memalpha/test.parquet')
             self.test_data = self.test_data[self.test_data['data_source'] == 'perltqa']
             print(f"Loaded PerlTQA dataset: {len(self.train_data)} train samples, {len(self.test_data)} test samples")
-
-        elif dataset == "narrativeqa":
-            self.train_data = pd.read_parquet("./data/memalpha/narrativeqa/train.parquet")
-            self.test_data = pd.read_parquet("./data/memalpha/narrativeqa/test.parquet")
-            print(f"Loaded NarrativeQA dataset: {len(self.train_data)} train samples, {len(self.test_data)} test samples")
-
-        elif dataset == 'cr_train':
-            self.train_data = pd.read_parquet("./data/memalpha/cr_train/train.parquet")
-            self.test_data = pd.read_parquet("./data/memalpha/cr_train/test.parquet")
-            print(f"Loaded CR Train dataset: {len(self.train_data)} train samples, {len(self.test_data)} test samples")
-
-        elif dataset == 'lme_train':
-            # Load LME Train dataset - filter from memoryagentbench for lme_train data source
-            self.train_data = pd.read_parquet("./data/memalpha/train.parquet")
-            self.train_data = self.train_data[self.train_data['data_source'] == 'lme_train']
-            self.test_data = pd.read_parquet("./data/memalpha/test.parquet")
-            self.test_data = self.test_data[self.test_data['data_source'] == 'lme_train']
-            print(f"Loaded LME Train dataset: {len(self.train_data)} train samples, {len(self.test_data)} test samples")
 
         elif dataset == 'longmemeval':
             # Load LongMemEval datasets - filter for longmemeval_s* data sources
@@ -830,7 +798,7 @@ Your answer:
             print(f"Loaded LongMemEval dataset: {len(self.train_data)} train samples, {len(self.test_data)} test samples")
 
         else:
-            raise ValueError(f"Unknown dataset: {dataset}. Supported datasets: 'memalpha', 'friends', 'arxiv-classification', 'pubmed-rct', 'wos46985', 'eurlex', 'perltqa', 'narrativeqa', 'cr_train', 'lme_train', 'longmemeval'")
+            raise ValueError(f"Unknown dataset: {dataset}. Supported datasets: 'memalpha', 'pubmed-rct', 'perltqa', 'longmemeval', 'memoryagentbench', 'squad', 'hotpotqa'")
 
     async def async_query_memagent(self, prompt, chunks, questions, model_name, tokenizer, data_source=None):
         """Asynchronously query MemAgent model with the given prompt, chunks, and questions"""
@@ -983,11 +951,8 @@ Your answer:
         if not all_messages:
             return []
 
-
-        print(f"Processing {len(all_messages)} prompts in batch mode")
-
         # Prepare prompts based on model type
-        if self.model == "qwen3-32b" or self.model == "qwen3-32b-bm25" or self.model == 'mem1':
+        if self.model in ["qwen3-32b"] or self.model == "qwen3-32b-bm25" or self.model == 'mem1':
             # Convert all messages to prompts for Qwen
             all_prompts = []
             max_input_tokens = 30000
@@ -997,7 +962,7 @@ Your answer:
             is_openrouter = self.qwen_is_openrouter or ("openrouter" in base_url_str.lower())
             openrouter_api_key = self.openrouter_api_key or os.getenv("OPENROUTER_API_KEY", "EMPTY")
 
-            for messages in all_messages:
+            for messages in tqdm(all_messages, total=len(all_messages)):
                 prompt = self.tokenizer.apply_chat_template(
                     messages,
                     tokenize=False,
@@ -1016,7 +981,7 @@ Your answer:
                 all_prompts.append(prompt)
 
             # Process in mini-batches to avoid API limits
-            batch_size = qwen_batch_size
+            batch_size = qwen_batch_size if not is_openrouter else 32
             all_results = []
 
             if len(all_prompts) > batch_size:
@@ -1373,10 +1338,6 @@ Your answer:
                     question = qa_pair.get('question', '')
                     gold_answer = qa_pair.get('answer', '')
 
-                    # # Skip if already processed
-                    # if (question, data_source) in processed_questions:
-                    #     continue
-
                     if question:
                         # Check if we already have results for this question
                         existing_answer = self._get_existing_answer(question, data_source)
@@ -1615,8 +1576,8 @@ Your answer:
 
         # Run evaluations
         train_results = []
-        test_results = self.run_test_evaluation(test_samples, dataset)
 
+        test_results = self.run_test_evaluation(test_samples, dataset)
         metrics = {}
 
         # Save results
@@ -1642,7 +1603,7 @@ def main():
     """Main function to run the evaluation
 
     Examples:
-        # Evaluate on pubmed-rct dataset
+        # Evaluate on pumed-rct dataset
         python long_context_eval.py --dataset pubmed-rct --model gpt-4o-mini --test_samples 100
 
         # Evaluate on booksum dataset
@@ -1670,7 +1631,7 @@ def main():
     parser.add_argument('--test_samples', type=int, default=-1,
                        help='Number of test samples to evaluate (-1 for all)')
     parser.add_argument('--dataset', type=str, default='memalpha',
-                       choices=['memalpha', 'friends', 'arxiv-classification', 'pubmed-rct', 'wos46985', 'eurlex', 'booksum', 'detectiveqa', 'perltqa', 'narrativeqa', 'long_range_understanding', 'accurate_retrieval', 'test_time_learning', "cr_train", "lme_train", "longmemeval", 'memoryagentbench'],
+                       choices=['memalpha', 'pubmed-rct', 'booksum', 'perltqa', 'long_range_understanding', 'accurate_retrieval', 'test_time_learning', "longmemeval", 'memoryagentbench', 'squad', 'hotpotqa'],
                        help='Dataset to use for evaluation')
     parser.add_argument('--force_rescore', action='store_true',
                        help='Force recomputation of all scores (keeping existing predicted answers)')
@@ -1703,33 +1664,5 @@ def main():
         dataset=args.dataset
     )
 
-# def test():
-#     import argparse
-
-#     parser = argparse.ArgumentParser(description='Run long context evaluation')
-#     parser.add_argument('--model', type=str, default='gpt-4o-mini',
-#                        choices=['gpt-4o-mini', 'gpt-4.1-mini', 'qwen3-32b', 'qwen3-32b-bm25'],
-#                        help='Model to use for evaluation')
-#     parser.add_argument('--without_chunks', action='store_true',
-#                        help='Run evaluation without chunks')
-#     parser.add_argument('--train_samples', type=int, default=0,
-#                        help='Number of training samples to evaluate (-1 for all)')
-#     parser.add_argument('--test_samples', type=int, default=-1,
-#                        help='Number of test samples to evaluate (-1 for all)')
-#     parser.add_argument('--dataset', type=str, default='memalpha',
-#                        choices=['memalpha', 'friends', 'arxiv-classification', 'pubmed-rct', 'wos46985', 'eurlex', 'booksum'],
-#                        help='Dataset to use for evaluation')
-
-#     args = parser.parse_args()
-
-#     evaluator = LongContextEvaluator(
-#         model_name=args.model,
-#         without_chunks=args.without_chunks
-#     )
-#     evaluator.recompute_scores('results/gpt_4o_mini_with_chunks_eurlex_results.json')
-
 if __name__ == "__main__":
     train_results, test_results, metrics = main()
-    # test()
-()
-    # test()

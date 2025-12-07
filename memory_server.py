@@ -7,6 +7,7 @@ constructs system prompts from the memories, and generates responses using OpenA
 """
 
 import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"  # Avoid tokenizer parallel threads before multiprocessing fork
 import json
 import logging
 import argparse

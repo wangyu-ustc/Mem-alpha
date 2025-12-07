@@ -93,7 +93,7 @@ git lfs pull  # Pull the actual dataset files
 cd ../..
 ```
 
-> **⚠️ Important:** Without Git LFS installed, you'll only download small pointer files (~133 bytes) instead of the actual datasets (~13-18 MB). Make sure to run `git lfs pull` after cloning to download the real data files.
+> **⚠️ Important:** Without Git LFS installed, you'll only download small pointer files (~133 bytes) instead of the actual datasets (~62 MB for memalpha). Make sure to run `git lfs pull` after cloning to download the real data files.
 
 > **Note:** We use a processed version of the [original MemoryAgentBench](https://huggingface.co/datasets/ai-hyz/MemoryAgentBench) dataset. See [Dataset Processing](#dataset-processing) for details.
 
