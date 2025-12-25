@@ -12,6 +12,10 @@ booksum:
     query_prompt: "Your core memory contains a comprehensive book summary. Use this information to fulfill the user's request."
     including_core: true
 
+infbench_sum_eng_shots2:
+    query_prompt: "Your core memory contains a comprehensive book summary. Use this information to fulfill the user's request."
+    including_core: true
+
 pubmed-rct:
     query_prompt: "Your core memory is used to store the classification rules of the articles. Identify the meaning of each class and how the article is classified. Fulfill the user's request with the core memory.\n\nWhen answering questions, you should put the final prediction in the format of \\boxed{label}. Note that the label is a single number."
     including_core: true

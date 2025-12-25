@@ -25,13 +25,21 @@ from tqdm import tqdm
 # Load environment variables
 dotenv.load_dotenv()
 
-# Azure OpenAI configuration
-api_key = os.getenv("AZURE_OPENAI_API_KEY")
-client = AzureOpenAI(
-    api_key=api_key,
-    api_version="2025-01-01-preview",
-    azure_endpoint="https://jplml-resource.cognitiveservices.azure.com"
-)
+# Load the Qwen tokenizer for accurate token counting
+from transformers import AutoTokenizer
+qwen_tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-32B", trust_remote_code=True)
+
+def count_tokens_qwen(text):
+    """Count tokens using Qwen3-32B tokenizer"""
+    return len(qwen_tokenizer.encode(text))
+
+# # Azure OpenAI configuration
+# api_key = os.getenv("AZURE_OPENAI_API_KEY")
+# client = AzureOpenAI(
+#     api_key=api_key,
+#     api_version="2025-01-01-preview",
+#     azure_endpoint="https://jplml-resource.cognitiveservices.azure.com"
+# )
 
 qwen32b_server_url = os.getenv("QWEN_URL")
 
@@ -146,7 +154,7 @@ def judge_answer_with_token_logic(ground_truth_answer, predicted_answer, debug=F
         return 0  # Keep examples with empty answers for safety
 
     # Count tokens in ground truth answer
-    ground_truth_tokens = count_tokens(ground_truth)
+    ground_truth_tokens = count_tokens_qwen(ground_truth)
 
     # Check condition (1): ground truth answer is less than 5 tokens
     condition_1 = ground_truth_tokens < 5
@@ -180,18 +188,18 @@ def judge_answer_with_token_logic(ground_truth_answer, predicted_answer, debug=F
 # This is controlled by the variable_size parameter in chunking functions.
 # Booksum dataset is excluded from this feature as requested.
 
-def count_tokens(text, model="gpt-4o-mini"):
-    """Count tokens using tiktoken"""
-    encoding = tiktoken.encoding_for_model(model)
+# def count_tokens_qwen(text, model="gpt-4o-mini"):
+#     """Count tokens using tiktoken"""
+#     encoding = tiktoken.encoding_for_model(model)
 
-    # Convert input to string if it's not already a string
-    if not isinstance(text, str):
-        if isinstance(text, list):
-            text = " ".join(str(item) for item in text)
-        else:
-            text = str(text)
+#     # Convert input to string if it's not already a string
+#     if not isinstance(text, str):
+#         if isinstance(text, list):
+#             text = " ".join(str(item) for item in text)
+#         else:
+#             text = str(text)
 
-    return len(encoding.encode(text))
+#     return len(encoding.encode(text))
 
 def create_chunks_use_sent_tokenizer(text, max_tokens=10000):
     """Create chunks from text using sentence tokenization"""
@@ -213,7 +221,7 @@ def create_chunks_use_sent_tokenizer(text, max_tokens=10000):
         if '<|endoftext|>' in sentence:
             sentence = sentence.replace('<|endoftext|>', '\n')
 
-        sentence_tokens = count_tokens(sentence)
+        sentence_tokens = count_tokens_qwen(sentence)
 
         # If adding this sentence would exceed max_tokens, start a new chunk
         if current_tokens + sentence_tokens > max_tokens and current_chunk:
@@ -224,7 +232,7 @@ def create_chunks_use_sent_tokenizer(text, max_tokens=10000):
             if current_chunk:
                 # Add space between sentences
                 current_chunk += " " + sentence
-                current_tokens += sentence_tokens + count_tokens(" ")
+                current_tokens += sentence_tokens + count_tokens_qwen(" ")
             else:
                 current_chunk = sentence
                 current_tokens = sentence_tokens
@@ -259,7 +267,7 @@ def create_chunks(contexts, max_tokens=2000, min_tokens=None, variable_size=Fals
         target_tokens = max_tokens
 
     for context in contexts:
-        context_tokens = count_tokens(context)
+        context_tokens = count_tokens_qwen(context)
 
         # If adding this context would exceed target_tokens, start a new chunk
         if current_tokens + context_tokens > target_tokens and current_chunk:
@@ -275,7 +283,7 @@ def create_chunks(contexts, max_tokens=2000, min_tokens=None, variable_size=Fals
         else:
             if current_chunk:
                 current_chunk += "\n\n" + context
-                current_tokens += context_tokens + count_tokens("\n\n")
+                current_tokens += context_tokens + count_tokens_qwen("\n\n")
             else:
                 current_chunk = context
                 current_tokens = context_tokens
@@ -397,7 +405,7 @@ def process_squad_dataset(split='train', num_chunks=10, max_chunks_allowed=20):
 
         chunks = create_chunks(unique_contexts, max_tokens=2048, min_tokens=100, variable_size=True)
         # Print chunk size statistics
-        chunk_sizes = [count_tokens(chunk) for chunk in chunks]
+        chunk_sizes = [count_tokens_qwen(chunk) for chunk in chunks]
         print(f"Chunk size statistics - Min: {min(chunk_sizes)}, Max: {max(chunk_sizes)}, Avg: {sum(chunk_sizes)/len(chunk_sizes):.1f}")
 
         # Create data instances with 10 chunks each
@@ -439,7 +447,7 @@ def process_squad_dataset(split='train', num_chunks=10, max_chunks_allowed=20):
                         all_qas.extend(cur_qas)
 
             # filter out oversized questions
-            all_qas = [qa for qa in all_qas if count_tokens(qa['question']) < 2048]
+            all_qas = [qa for qa in all_qas if count_tokens_qwen(qa['question']) < 2048]
 
             # Filter out instances with less than 50 questions
             if len(all_qas) < 50:
@@ -479,7 +487,7 @@ def process_squad_dataset(split='train', num_chunks=10, max_chunks_allowed=20):
         for instance in processed_data:
             for qa in instance['questions_and_answers']:
                 original_count += 1
-                answer_tokens = count_tokens(str(qa['answer']).strip())
+                answer_tokens = count_tokens_qwen(str(qa['answer']).strip())
                 if answer_tokens < 5:
                     all_questions.append(qa['question'])
                     question_to_answer[qa['question']] = qa['answer']
@@ -534,7 +542,7 @@ def process_squad_dataset(split='train', num_chunks=10, max_chunks_allowed=20):
             predicted = question_to_predicted_answer[q]
 
             # Count short answers for statistics
-            if count_tokens(str(ground_truth).strip()) < 5:
+            if count_tokens_qwen(str(ground_truth).strip()) < 5:
                 short_answer_count += 1
 
             # Handle filtered questions (long answers that weren't processed)
@@ -661,7 +669,7 @@ def process_hotpotqa_dataset():
         print("Calculating article statistics...")
         article_tokens = []
         for title, text in unique_articles.items():
-            tokens = count_tokens(f"Title: {title}\n{text}")
+            tokens = count_tokens_qwen(f"Title: {title}\n{text}")
             article_tokens.append(tokens)
 
         avg_article_tokens = sum(article_tokens) / len(article_tokens)
@@ -736,7 +744,7 @@ def process_hotpotqa_dataset():
         for instance in processed_data:
             for qa in instance['questions_and_answers']:
                 original_count += 1
-                answer_tokens = count_tokens(str(qa['answer']).strip())
+                answer_tokens = count_tokens_qwen(str(qa['answer']).strip())
                 if answer_tokens < 5:
                     all_questions.append(qa['question'])
                     question_to_answer[qa['question']] = qa['answer']
@@ -784,7 +792,7 @@ def process_hotpotqa_dataset():
             predicted = question_to_predicted_answer[q]
 
             # Count short answers for statistics
-            if count_tokens(str(ground_truth).strip()) < 5:
+            if count_tokens_qwen(str(ground_truth).strip()) < 5:
                 short_answer_count += 1
 
             # Handle filtered questions (long answers that weren't processed)
@@ -902,7 +910,7 @@ def create_data_instance(article_titles, questions, unique_articles):
         chunk_title_mapping.append(titles_in_chunk)
 
     # Print chunk size statistics for this instance
-    chunk_sizes = [count_tokens(chunk_text) for chunk_text in chunk_texts]
+    chunk_sizes = [count_tokens_qwen(chunk_text) for chunk_text in chunk_texts]
     print(f"Instance chunks - Count: {len(chunk_texts)}, Sizes: Min={min(chunk_sizes)}, Max={max(chunk_sizes)}, Avg={sum(chunk_sizes)/len(chunk_sizes):.1f}")
 
     # Format questions and answers with evidence_idx
@@ -965,7 +973,7 @@ def create_chunks_with_titles(titles, texts, max_tokens=2000, min_tokens=None, v
 
     for title, text in zip(titles, texts):
         text_with_title = f"Title: {title}\n{text}"
-        text_tokens = count_tokens(text_with_title)
+        text_tokens = count_tokens_qwen(text_with_title)
 
         # CRITICAL FIX: Truncate oversized articles to prevent massive chunks
         if text_tokens > target_tokens:
@@ -973,7 +981,7 @@ def create_chunks_with_titles(titles, texts, max_tokens=2000, min_tokens=None, v
             max_text_chars = min(len(text), (target_tokens - 100) * 4)  # ~4 chars per token estimate
             truncated_text = text[:max_text_chars]
             text_with_title = f"Title: {title}\n{truncated_text}"
-            text_tokens = count_tokens(text_with_title)
+            text_tokens = count_tokens_qwen(text_with_title)
 
             # If still too large after truncation, skip this article
             if text_tokens > target_tokens:
@@ -995,7 +1003,7 @@ def create_chunks_with_titles(titles, texts, max_tokens=2000, min_tokens=None, v
         else:
             if current_chunk:
                 current_chunk += "\n\n" + text_with_title
-                current_tokens += text_tokens + count_tokens("\n\n")
+                current_tokens += text_tokens + count_tokens_qwen("\n\n")
             else:
                 current_chunk = text_with_title
                 current_tokens = text_tokens
@@ -1115,7 +1123,7 @@ def process_pubmed_rct_dataset():
 
         for sample in samples:
             sample_text = format_sample_for_chunk(sample)
-            sample_tokens = count_tokens(sample_text)
+            sample_tokens = count_tokens_qwen(sample_text)
 
             # Check if adding this sample would exceed the token limit
             if total_tokens + sample_tokens > target_tokens:
@@ -1152,7 +1160,7 @@ def process_pubmed_rct_dataset():
 
         for sample in available_samples:
             sample_text = format_sample_for_chunk(sample)
-            sample_tokens = count_tokens(sample_text)
+            sample_tokens = count_tokens_qwen(sample_text)
 
             # If this is the first sample and it's too big, try to truncate or skip
             if len(chunk_samples) == 0 and sample_tokens > target_tokens:
@@ -1162,7 +1170,7 @@ def process_pubmed_rct_dataset():
                     'labels': sample['labels']
                 }
                 truncated_text = format_sample_for_chunk(truncated_sample)
-                truncated_tokens = count_tokens(truncated_text)
+                truncated_tokens = count_tokens_qwen(truncated_text)
 
                 if truncated_tokens <= target_tokens:
                     chunk_samples.append(truncated_sample)
@@ -1288,7 +1296,7 @@ def process_pubmed_rct_dataset():
                                 instance_used_indices.add(idx)
                                 break
 
-                    print(f"  Chunk {chunk_idx+1}: {count_tokens(chunk_text)} tokens, {len(used_samples)} samples")
+                    print(f"  Chunk {chunk_idx+1}: {count_tokens_qwen(chunk_text)} tokens, {len(used_samples)} samples")
                 else:
                     print(f"  Failed to create Chunk {chunk_idx+1}")
                     break
@@ -1382,7 +1390,7 @@ def process_booksum_dataset():
 
         for idx, chapter in enumerate(all_chapters):
 
-            num_tokens = count_tokens(chapter['text'])
+            num_tokens = count_tokens_qwen(chapter['text'])
 
             print(f"Processing chapter {idx+1}/{len(all_chapters)}: Book {chapter['book_title']}, Chapter {chapter['chapter_id']}, Length {num_tokens}")
 
@@ -1390,7 +1398,7 @@ def process_booksum_dataset():
             chapter_chunks_raw = []
             if num_tokens > 2048:
                 chunks = create_chunks_use_sent_tokenizer(chapter['text'], max_tokens=2048)
-                print("Created chunks with lengths: ", [count_tokens(chunk) for chunk in chunks])
+                print("Created chunks with lengths: ", [count_tokens_qwen(chunk) for chunk in chunks])
                 chapter_chunks_raw = chunks
             else:
                 chapter_chunks_raw = [chapter['text']]
@@ -1554,7 +1562,7 @@ def analyze_dataset_statistics():
         all_chunk_lengths = []
         for instance in standardized_instances:
             for chunk in instance['chunks']:
-                chunk_length = count_tokens(chunk)
+                chunk_length = count_tokens_qwen(chunk)
                 all_chunk_lengths.append(chunk_length)
 
         # Calculate averages
@@ -2941,14 +2949,6 @@ def process_lme_train_dataset():
     with open("./data/longmemeval_combined_train_v2.json", 'r', encoding='utf-8') as f:
         data = json.load(f)
 
-    # Load the Qwen tokenizer for accurate token counting
-    from transformers import AutoTokenizer
-    qwen_tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-32B", trust_remote_code=True)
-
-    def count_tokens_qwen(text):
-        """Count tokens using Qwen3-32B tokenizer"""
-        return len(qwen_tokenizer.encode(text))
-
     processed_data = []
 
     # Process each sample
@@ -3170,14 +3170,6 @@ def process_memory_agent_bench(split='Accurate_Retrieval'):
 
     ar_ds = load_dataset("ai-hyz/MemoryAgentBench", split=split)
 
-    # Load the Qwen tokenizer for accurate token counting for longmemeval_s*
-    from transformers import AutoTokenizer
-    qwen_tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-32B", trust_remote_code=True)
-
-    def count_tokens_qwen(text):
-        """Count tokens using Qwen3-32B tokenizer"""
-        return len(qwen_tokenizer.encode(text))
-
     processed_data = []
 
     if split == 'Long_Range_Understanding':
@@ -3391,7 +3383,7 @@ def process_memory_agent_bench(split='Accurate_Retrieval'):
                 chunks.append(current_chunk)
 
             for chunk in chunks:
-                assert count_tokens(chunk) <= 2048
+                assert count_tokens_qwen(chunk) <= 2048
 
         elif split == 'Test_Time_Learning':
             chunks = create_chunks_use_sent_tokenizer(context, max_tokens=1024)
@@ -3597,14 +3589,14 @@ def process_detectiveqa_dataset():
 
         novel_text = novel['text']
         # Count tokens in the novel
-        num_tokens = count_tokens(novel_text)
+        num_tokens = count_tokens_qwen(novel_text)
         print(f"Processing novel {novel_id}: {num_tokens} tokens, {len(questions_by_novel[novel_id])} questions")
 
         # Create chunks for this novel
         novel_chunks_raw = []
         if num_tokens > 4096:
             chunks = create_chunks_use_sent_tokenizer(novel_text, max_tokens=4096)
-            print(f"  Created {len(chunks)} chunks with lengths: {[count_tokens(chunk) for chunk in chunks]}")
+            print(f"  Created {len(chunks)} chunks with lengths: {[count_tokens_qwen(chunk) for chunk in chunks]}")
             novel_chunks_raw = chunks
         else:
             novel_chunks_raw = [novel_text]
@@ -3775,10 +3767,10 @@ class PerLTQAProcessor:
         chunk_text = chunk_text.strip()
         return chunk_text
 
-            # conv_tokens = count_tokens(conversation['event_content'])
+            # conv_tokens = count_tokens_qwen(conversation['event_content'])
             # for dialogue in conversation['dialogues']:
             #     for message in dialogue['messages']:
-            #         conv_tokens += count_tokens(message)
+            #         conv_tokens += count_tokens_qwen(message)
 
             # # Add conversation to current chunk
             # current_chunk.append(conversation)
@@ -4263,7 +4255,7 @@ def process_perltqa_dataset():
         total_qa_pairs = sum(len(group['questions_and_answers']) for group in processed_data)
 
         # Calculate token statistics
-        token_counts = [count_tokens("\n".join(item['chunks'])) for item in processed_data]
+        token_counts = [count_tokens_qwen("\n".join(item['chunks'])) for item in processed_data]
         min_tokens = min(token_counts) if token_counts else 0
         max_tokens = max(token_counts) if token_counts else 0
         avg_tokens = sum(token_counts) / len(token_counts) if token_counts else 0
@@ -4404,7 +4396,7 @@ def process_ttl_train_dataset():
                     examples.append({
                         'question': question,
                         'label': label,
-                        'tokens': count_tokens(question)
+                        'tokens': count_tokens_qwen(question)
                     })
                     i += 2
                 else:
